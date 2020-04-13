@@ -1,0 +1,170 @@
+library(cluster)
+install.packages("EnvStats")
+library(EnvStats)
+library(car)
+#!change working directory!
+#Data Inladen
+
+
+wijn <- read.csv("C:/Users/Gebruiker/Desktop/wijn.csv", header=FALSE, sep = ",")
+##schaling
+for (i in 2:13){
+  boxplot(wijn[,i]~wijn$V1)
+}
+#sommigge variabelen zijn van een drastish andere schaal dan anderen, schalen is dus angewezen
+###clustering ongeschaald
+chemwijn=wijn[,2:14]
+pclst = pam(chemwijn,2)
+table(wijn[,1],pclst$clustering)
+#na clustering in 2 groepen met pam, vormd het eerste ras een groep, en de twee andere een andere groep
+pclst = pam(chemwijn,4)
+table(wijn[,1],pclst$clustering)
+##clustering geschaald
+chemwijnsc=scale(chemwijn)
+pclstsc=pam(chemwijnsc,3)
+table(wijn$V1,pclstsc$clustering)
+#bij twee clusters zit 1 volledig in de ene en 3 (bijna)volledig in de andere, 2 is gemixt
+#bij 3clusters is komen derde ras en cluster overeen, en de 2de clusster bevat enkel ras 2 maar 1 bevat naast 1 ook een klein deel 2
+##fuzzy clustering
+fclstsc=fanny(chemwijnsc,3)
+fclstsc
+table(fclstsc$clustering,wijn$V1)
+# een fuzy clustering lijkt niets op te leveren, ieder eleent een gelijke kans op membership gevend
+##hyrarchical clustering
+aclstsc=agnes(chemwijnsc)
+aclstsc
+pltree(aclstsc)
+#gebruiken we agnes, komen we een vrij zinloze clustering uit, waarin twee van de clusters 1 resp 3 elementen hebben
+dclstsc=diana(chemwijnsc)
+pltree(dclstsc)
+table(wijn$V1,cutree(dclstsc,3))
+#met diana komen we bij 3 clusters gelijkaardigge resultaten als bij pam, alleen met meer elementen van ras 2 in cluster 1
+#merk echter op dat dit aantal clusters niet duidelijk volgt uit het dendrogram
+
+###noraliteit
+for (i in 2:14){
+  hist(wijn[,i])
+}
+#op het histogram, vanaf V2 op volgorde s,r,s,s,r,s,?,r?,s,r,s,s,r waar s is min of meer symetrish, en r is rechts scheef
+for (i in 2:14){
+  qqnorm(wijn[,i])
+}
+isnorm = rep(FALSE,13)
+for (i in 2:14){
+  isnorm[i-1]=shapiro.test(wijn[,i])$p.value>0.01
+}
+islognorm = rep(FALSE,13)
+for (i in 2:14){
+  islognorm[i-1]=shapiro.test(log(wijn[,i]))$p.value>0.01
+}
+lambda=rep(0,13)
+isbcnorm = rep(FALSE,13)
+for (i in 2:14){
+  lambda[i-1]=boxcox(wijn[,i],optimize=TRUE)$lambda
+  lmda=lambda[i-1]
+  isbcnorm[i-1]=0.01<shapiro.test((wijn[,i]^lmda-1)/lmda)$p.value
+}
+print(isnorm)
+print(islognorm)
+print(isbcnorm)
+print(lambda)
+qqnorm(wijn$V5)
+qqnorm(log(wijn$V5))
+#we transformeren de data afhankelijk van voorgaande testresultaten
+wijntrans=data.frame(wijn$V1)
+for (i in 2:14){
+  if (isnorm[i-1]) {
+    wijntrans[,i]=wijn[,i]
+  }
+  else if(islognorm[i-1]){
+    wijntrans[,i]=log(wijn[,i])
+  }
+  else{
+    wijntrans[,i]=((wijn[,i])^lambda[i-1]-1)/lambda[i-1]
+  }
+}
+scatterplotMatrix(wijntrans,diagonal="boxplot",smooth=F,regline=F)
+#zelf na transformaties ziet een deel van de data er nogsteeds duidelijk niet normaal uit
+#dit waarschijnlijk te wijten aan het feit dat sommigge variabelen bimodaal zijn, gevolg van andere druivenrassen
+##normaliteit van verdeelde data
+soort=array(c(F),dim=c(178,3))
+for (j in 1:3){
+  soort[,j]=wijn$V1==j
+}
+wijn1=wijn[soort[,1],]
+wijn2=wijn[soort[,2],]
+wijn3=wijn[soort[,3],]
+isnorm=array(c(FALSE),dim = c(3,13))
+for (j in 1:3){
+  for (i in 2:14){
+    isnorm[j,i-1]=0.01<shapiro.test(wijn[soort[,j],i])$p.value
+  }
+}
+print(isnorm)  
+scatterplotMatrix(wijn3,diagonal="boxplot",smooth=F,regline=F)
+#ook afzonderlijk vormen de punten geen normale deling, we zoeken dus transformaties waaronder de 3 wel normaal zijn
+#een eerste gok is de eerder getransformeerde data
+for (j in 1:3){
+  for (i in 2:14){
+    isnorm[j,i-1]=0.01<shapiro.test(wijntrans[soort[,j],i])$p.value
+  }
+}
+print(isnorm)
+print(isbcnorm)
+for (j in 1:3){
+  print(shapiro.test(log(wijn[soort[,j],3])))
+}
+
+#in een tweede poging nemen we een gewogen gemiddelde van de lambda's means = array(c(0),dim=c(3,13))
+vars = array(c(0),dim=c(3,13))
+for (j in 1:3){
+  for (i in 2:14){
+    means[j,i-1]=mean(wijn[soort[,j],i])
+    vars[j,i-1]=var(wijn[soort[,j],i])
+  }
+}
+lambda = array(c(0),dim=c(3,13))
+for(j in 1:3){
+  for (i in 2:14){
+    lambda[j,i-1]=boxcox(wijn[soort[,j],i],lambda=c(-3,3),optimize=T)$lambda
+  }
+}
+lambda
+weights=array(c(0),dim=c(3,13))
+weights=abs(means^(lambda-2)*(1+(lambda-1)*log(means)))*vars
+weights
+for (i in 1:13){
+  weights[,i]=weights[,i]/sum(weights[,i])
+}
+weights
+newlambda=array(c(0),dim=c(1,13))
+for (i in 1:13){
+  newlambda[,i]=sum(weights[,i]*lambda[,i])
+}
+newlambda  
+isbcnorm=array(c(F),dim=c(3,13))
+for (i in 2:14){
+  for (j in 1:3){
+    isbcnorm[j,i-1]=0.05<shapiro.test(((wijn[soort[,j],i])^newlambda[1,i-1]-1)/newlambda[1,i-1])$p.value
+  }
+}
+isbcnorm
+transdata=(wijn[,2:14]^newlambda-1)/newlambda
+scatterplotMatrix(transdata,diagonal="boxplot",smooth=F,regLine=F)
+for (j in 1:3){
+  scatterplotMatrix(transdata[soort[,j],],smooth=F,regLine=F)
+}
+useful = c(T,F,T,T,F,T,F,F,F,T,T,F,T)
+for (j in 1:3){
+  scatterplotMatrix(transdata[soort[,j],useful],smooth=F,regLine=F)
+}
+#deze poging leid ons tot gelijkaardigge resultaten met dat verschil dat de testresultaten normaal blijven
+#onder een groter bereik aan p waarden, en dat de kans op type 1 en type 2 fouten hier lager liggen
+#verdere pogingen zouden er nog in kunnen bestaan om een ander gemiddelde te nemen (HM,GM of RMS)
+#of een andere keuze van gewichten te nemen
+#de data door deze transformaties bekomen zien er wel min of meer eliptish uit in de normale variabelen, maar dit is lastig
+#te beoordelen daar de meeste variabelen enkele uitschieters hebben,en deze uitschieters zijn afhankelijk van de variabelen
+#waardoor (gegeven de kleine dataset) het geen goed idee lijkt om ze weg te laten
+#merk op dat bij V2,V6 en V13 het mischien geen slecht idee is om af te ronden en dus de logaritme te nemen als BC-transform
+
+  
